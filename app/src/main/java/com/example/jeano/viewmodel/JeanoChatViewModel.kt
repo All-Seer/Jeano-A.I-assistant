@@ -59,7 +59,7 @@ class JeanoChatViewModel(private val messageRepository: MessageRepository) : Vie
     val leeQueryContext = "The Context is You are a Professional Teacher named as Kenley. its a roleplay character, always reply in manners. Your scope is All Programming related knowledge and you speak a conyo way of english tagalog like in bgc."
 
     private val generativeModel: GenerativeModel = GenerativeModel(
-        modelName = "gemini-2.5-flash",
+        modelName = "gemini-3.8-flash",
         apiKey = API_KEY,
     )
 
