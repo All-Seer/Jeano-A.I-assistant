@@ -11,7 +11,9 @@ import com.example.jeano.model.repository.MessageRepository // Ensure correct re
 import com.google.ai.client.generativeai.Chat // Import Chat if you want persistent chat object
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.Content // Import Content
+import com.google.ai.client.generativeai.type.RequestOptions
 import com.google.ai.client.generativeai.type.content
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -61,7 +63,21 @@ class JeanoChatViewModel(private val messageRepository: MessageRepository) : Vie
     private val generativeModel: GenerativeModel = GenerativeModel(
         modelName = "gemini-3.8-flash",
         apiKey = API_KEY,
+        requestOptions = RequestOptions(timeout = 120.seconds),
     )
+
+    // Send only recent, valid turns: old error replies and the message being sent are dropped,
+    // and history is capped so requests don't slow down as the chat grows.
+    private fun buildHistory(messages: List<Pair<String, String>>, current: String): List<Content> {
+        val turns = messages
+            .filterNot { (_, msg) -> msg.startsWith("Error:") }
+            .toMutableList()
+        if (turns.lastOrNull()?.let { it.first == "user" && it.second == current } == true) {
+            turns.removeAt(turns.lastIndex)
+        }
+        val recent = turns.takeLast(MAX_HISTORY).dropWhile { it.first != "user" }
+        return recent.map { (role, msg) -> content(role) { text(msg) } }
+    }
 
     private fun insertMessage(message: MessageModel) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -86,9 +102,9 @@ class JeanoChatViewModel(private val messageRepository: MessageRepository) : Vie
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val currentHistory = allLeeMessages.value.map {
-                    content(it.role) { text(it.message) }
-                }
+                val currentHistory = buildHistory(
+                    allLeeMessages.value.map { it.role to it.message }, userMessageContent
+                )
                 val chat = generativeModel.startChat(history = currentHistory)
 
                 val response = chat.sendMessage("context is: $leeQueryContext, question is: $userMessageContent")
@@ -116,9 +132,9 @@ class JeanoChatViewModel(private val messageRepository: MessageRepository) : Vie
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val currentHistory = allBreaihMessages.value.map {
-                    content(it.role) { text(it.message) }
-                }
+                val currentHistory = buildHistory(
+                    allBreaihMessages.value.map { it.role to it.message }, userMessageContent
+                )
                 val chat = generativeModel.startChat(history = currentHistory)
 
                 val response = chat.sendMessage("context is: $breiahQueryContext, question is: $userMessageContent")
@@ -147,9 +163,9 @@ class JeanoChatViewModel(private val messageRepository: MessageRepository) : Vie
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val currentHistory = allMessages.value.map {
-                    content(it.role) { text(it.message) }
-                }
+                val currentHistory = buildHistory(
+                    allMessages.value.map { it.role to it.message }, userMessageContent
+                )
                 val chat = generativeModel.startChat(history = currentHistory)
 
                 val response = chat.sendMessage("context is: $queryContext, question is: $userMessageContent")
@@ -171,6 +187,8 @@ class JeanoChatViewModel(private val messageRepository: MessageRepository) : Vie
     }
 }
 
+
+private const val MAX_HISTORY = 20
 
 class JeanoChatViewModelFactory(private val messageRepository: MessageRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
